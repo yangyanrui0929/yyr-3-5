@@ -11,12 +11,37 @@ import {
 import { calculatePowerNetwork, countPoweredBuildings } from '../utils/powerCalculator';
 
 const STORAGE_KEY = 'floating-island-grid-game-save';
+const SNAPSHOT_KEY = 'floating-island-grid-snapshots';
 
 interface PersistedState {
   grid: GridCell[][];
   dayTime: number;
   storedPower: number;
   satisfaction: number;
+}
+
+export interface GridSnapshot {
+  id: string;
+  name: string;
+  timestamp: number;
+  grid: GridCell[][];
+  poweredCells: string[];
+  satisfaction: number;
+  storedPower: number;
+  maxStorage: number;
+  totalGeneration: number;
+  totalConsumption: number;
+  dayTime: number;
+}
+
+type CellDiffType = 'added' | 'removed' | 'modified' | 'unchanged';
+
+export interface CellDiff {
+  type: CellDiffType;
+  oldType?: string;
+  newType?: string;
+  oldRotation?: number;
+  newRotation?: number;
 }
 
 interface GameState {
@@ -30,6 +55,8 @@ interface GameState {
   totalGeneration: number;
   totalConsumption: number;
   showSettlement: boolean;
+  snapshots: GridSnapshot[];
+  activeSnapshotId: string | null;
   setSelectedTool: (tool: ToolType) => void;
   placeOrRemove: (x: number, y: number) => void;
   rotateCell: (x: number, y: number) => void;
@@ -38,6 +65,12 @@ interface GameState {
   resetGame: () => void;
   openSettlement: () => void;
   closeSettlement: () => void;
+  saveSnapshot: (name?: string) => string;
+  selectSnapshot: (id: string | null) => void;
+  deleteSnapshot: (id: string) => void;
+  renameSnapshot: (id: string, name: string) => void;
+  clearSnapshots: () => void;
+  computeDiff: () => Map<string, CellDiff> | null;
 }
 
 function createEmptyGrid(): GridCell[][] {
@@ -92,6 +125,34 @@ function loadFromLocalStorage(): PersistedState | null {
   return null;
 }
 
+function saveSnapshotsToLocalStorage(snapshots: GridSnapshot[]): void {
+  try {
+    localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshots));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function loadSnapshotsFromLocalStorage(): GridSnapshot[] {
+  try {
+    const raw = localStorage.getItem(SNAPSHOT_KEY);
+    if (!raw) return [];
+    const data = JSON.parse(raw);
+    if (Array.isArray(data)) {
+      return data.filter(
+        (s) =>
+          s &&
+          typeof s.id === 'string' &&
+          s.grid &&
+          Array.isArray(s.grid)
+      );
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return [];
+}
+
 function recalcGrid(grid: GridCell[][], dayTime: number, storedPower: number) {
   const { poweredCells, totalGeneration, totalConsumption, batteryCapacity } =
     calculatePowerNetwork(grid, dayTime, storedPower);
@@ -112,6 +173,7 @@ function initGame(): Omit<GameState, keyof GameStateActions> {
   const dayTime = saved ? saved.dayTime : 20;
   const storedPower = saved ? saved.storedPower : 10;
   const satisfaction = saved ? saved.satisfaction : 50;
+  const snapshots = loadSnapshotsFromLocalStorage();
 
   const { newGrid, poweredCells, totalGeneration, totalConsumption, batteryCapacity } =
     recalcGrid(grid, dayTime, storedPower);
@@ -127,6 +189,8 @@ function initGame(): Omit<GameState, keyof GameStateActions> {
     totalGeneration,
     totalConsumption,
     showSettlement: false,
+    snapshots,
+    activeSnapshotId: null,
   };
 }
 
@@ -140,6 +204,12 @@ type GameStateActions = Pick<
   | 'resetGame'
   | 'openSettlement'
   | 'closeSettlement'
+  | 'saveSnapshot'
+  | 'selectSnapshot'
+  | 'deleteSnapshot'
+  | 'renameSnapshot'
+  | 'clearSnapshots'
+  | 'computeDiff'
 >;
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -343,4 +413,109 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   openSettlement: () => set({ showSettlement: true }),
   closeSettlement: () => set({ showSettlement: false }),
+
+  saveSnapshot: (name) => {
+    const state = get();
+    const id =
+      Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const snapshotName =
+      name?.trim() || `快照 ${state.snapshots.length + 1}`;
+
+    const snapshot: GridSnapshot = {
+      id,
+      name: snapshotName,
+      timestamp: Date.now(),
+      grid: state.grid.map((row) => row.map((c) => ({ ...c }))),
+      poweredCells: Array.from(state.poweredCells),
+      satisfaction: state.satisfaction,
+      storedPower: state.storedPower,
+      maxStorage: state.maxStorage,
+      totalGeneration: state.totalGeneration,
+      totalConsumption: state.totalConsumption,
+      dayTime: state.dayTime,
+    };
+
+    const newSnapshots = [...state.snapshots, snapshot];
+    saveSnapshotsToLocalStorage(newSnapshots);
+    set({ snapshots: newSnapshots });
+    return id;
+  },
+
+  selectSnapshot: (id) => set({ activeSnapshotId: id }),
+
+  deleteSnapshot: (id) => {
+    const state = get();
+    const newSnapshots = state.snapshots.filter((s) => s.id !== id);
+    saveSnapshotsToLocalStorage(newSnapshots);
+    set({
+      snapshots: newSnapshots,
+      activeSnapshotId: state.activeSnapshotId === id ? null : state.activeSnapshotId,
+    });
+  },
+
+  renameSnapshot: (id, name) => {
+    const state = get();
+    const newSnapshots = state.snapshots.map((s) =>
+      s.id === id ? { ...s, name: name.trim() || s.name } : s
+    );
+    saveSnapshotsToLocalStorage(newSnapshots);
+    set({ snapshots: newSnapshots });
+  },
+
+  clearSnapshots: () => {
+    saveSnapshotsToLocalStorage([]);
+    set({ snapshots: [], activeSnapshotId: null });
+  },
+
+  computeDiff: () => {
+    const state = get();
+    if (!state.activeSnapshotId) return null;
+
+    const snapshot = state.snapshots.find((s) => s.id === state.activeSnapshotId);
+    if (!snapshot) return null;
+
+    const diff = new Map<string, CellDiff>();
+
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        const key = `${x},${y}`;
+        const oldCell = snapshot.grid[y][x];
+        const newCell = state.grid[y][x];
+
+        const oldEmpty = oldCell.type === 'empty';
+        const newEmpty = newCell.type === 'empty';
+
+        if (oldEmpty && newEmpty) {
+          diff.set(key, { type: 'unchanged' });
+        } else if (oldEmpty && !newEmpty) {
+          diff.set(key, {
+            type: 'added',
+            newType: newCell.type,
+            newRotation: newCell.rotation,
+          });
+        } else if (!oldEmpty && newEmpty) {
+          diff.set(key, {
+            type: 'removed',
+            oldType: oldCell.type,
+            oldRotation: oldCell.rotation,
+          });
+        } else if (
+          oldCell.type !== newCell.type ||
+          (oldCell.type === 'wire' && oldCell.rotation !== newCell.rotation)
+        ) {
+          diff.set(key, {
+            type: 'modified',
+            oldType: oldCell.type,
+            newType: newCell.type,
+            oldRotation: oldCell.rotation,
+            newRotation: newCell.rotation,
+          });
+        } else {
+          diff.set(key, { type: 'unchanged' });
+        }
+      }
+    }
+
+    return diff;
+  },
 }));

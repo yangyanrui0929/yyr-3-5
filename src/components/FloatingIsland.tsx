@@ -1,10 +1,20 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { GridCellComponent } from './GridCell';
 import { GRID_SIZE } from '../utils/constants';
 
 export const FloatingIsland: React.FC = () => {
-  const { grid, selectedTool, placeOrRemove, rotateCell, repairCell, dayTime } = useGameStore();
+  const {
+    grid,
+    selectedTool,
+    placeOrRemove,
+    rotateCell,
+    repairCell,
+    dayTime,
+    activeSnapshotId,
+    snapshots,
+    computeDiff,
+  } = useGameStore();
 
   const handleCellClick = (x: number, y: number) => {
     const cell = grid[y][x];
@@ -43,6 +53,12 @@ export const FloatingIsland: React.FC = () => {
 
   const isNight = dayTime >= 50;
 
+  const { diffMap, activeSnapshot } = useMemo(() => {
+    const snapshot = snapshots.find((s) => s.id === activeSnapshotId) || null;
+    const diff = computeDiff();
+    return { diffMap: diff, activeSnapshot: snapshot };
+  }, [activeSnapshotId, snapshots, computeDiff]);
+
   return (
     <div className="relative">
       <div
@@ -79,30 +95,91 @@ export const FloatingIsland: React.FC = () => {
           }}
         />
 
-        <div
-          className="grid gap-0.5 p-2 rounded-2xl"
-          style={{
-            gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
-            background: isNight
-              ? 'linear-gradient(135deg, #1a3a0f 0%, #0f2a08 100%)'
-              : 'linear-gradient(135deg, #8BC34A 0%, #689F38 100%)',
-            boxShadow: 'inset 0 4px 12px rgba(0,0,0,0.2)',
-          }}
-        >
-          {grid.map((row, y) =>
-            row.map((cell, x) => (
-              <div key={`${x}-${y}`} className="grid-cell" data-x={x} data-y={y}>
-                <GridCellComponent
-                  cell={cell}
-                  selectedTool={selectedTool}
-                  onClick={() => handleCellClick(x, y)}
-                  onRightClick={(e) => handleCellRightClick(e, x, y)}
-                />
-              </div>
-            ))
+        <div className="relative">
+          {activeSnapshot && (
+            <div
+              className="absolute inset-0 grid gap-0.5 p-2 rounded-2xl pointer-events-none z-0"
+              style={{
+                gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
+                opacity: 0.35,
+                transform: 'translate(6px, 6px)',
+                filter: 'blur(0.5px)',
+              }}
+            >
+              {activeSnapshot.grid.map((row, y) =>
+                row.map((cell, x) => (
+                  <div
+                    key={`shadow-${x}-${y}`}
+                    className={`
+                      w-14 h-14 border rounded-[4px] transition-opacity
+                      ${
+                        cell.type !== 'empty'
+                          ? 'border-indigo-400/60 border-dashed bg-indigo-200/30'
+                          : 'border-transparent bg-transparent'
+                      }
+                    `}
+                    style={{
+                      borderRadius: '4px',
+                    }}
+                  >
+                    {cell.type !== 'empty' && (
+                      <div className="w-full h-full flex items-center justify-center opacity-70">
+                        <span className="text-2xl filter grayscale saturate-50">
+                          {cell.type === 'windmill' && '🌀'}
+                          {cell.type === 'house' && '🏠'}
+                          {cell.type === 'factory' && '🏭'}
+                          {cell.type === 'battery' && '🔋'}
+                          {cell.type === 'wire' && '⚡'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           )}
+
+          <div
+            className="grid gap-0.5 p-2 rounded-2xl relative z-10"
+            style={{
+              gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
+              background: isNight
+                ? 'linear-gradient(135deg, #1a3a0f 0%, #0f2a08 100%)'
+                : 'linear-gradient(135deg, #8BC34A 0%, #689F38 100%)',
+              boxShadow: 'inset 0 4px 12px rgba(0,0,0,0.2)',
+            }}
+          >
+            {grid.map((row, y) =>
+              row.map((cell, x) => {
+                const key = `${x},${y}`;
+                const diff = diffMap?.get(key) || null;
+                const snapshotCell = activeSnapshot ? activeSnapshot.grid[y][x] : null;
+                return (
+                  <div key={`${x}-${y}`} className="grid-cell" data-x={x} data-y={y}>
+                    <GridCellComponent
+                      cell={cell}
+                      selectedTool={selectedTool}
+                      onClick={() => handleCellClick(x, y)}
+                      onRightClick={(e) => handleCellRightClick(e, x, y)}
+                      diff={diff}
+                      snapshotCell={snapshotCell}
+                    />
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
+
+      {activeSnapshot && (
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-20">
+          <div className="bg-indigo-500/90 backdrop-blur-sm text-white text-xs font-semibold px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5">
+            <span>🔮</span>
+            <span>对比中：{activeSnapshot.name}</span>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes float {

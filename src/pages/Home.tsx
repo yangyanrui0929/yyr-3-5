@@ -2,6 +2,7 @@ import { FloatingIsland } from '@/components/FloatingIsland';
 import { Toolbar } from '@/components/Toolbar';
 import { StatusBar } from '@/components/StatusBar';
 import { SettlementModal } from '@/components/SettlementModal';
+import { EchoPanel } from '@/components/EchoPanel';
 import { useGameLoop } from '@/hooks/useGameLoop';
 import { useGameStore } from '@/store/useGameStore';
 
@@ -21,7 +22,7 @@ export default function Home() {
     >
       <Clouds isNight={isNight} />
 
-      <div className="relative z-10 max-w-6xl mx-auto px-4 py-6 flex flex-col gap-6">
+      <div className="relative z-10 max-w-7xl mx-auto px-4 py-6 flex flex-col gap-6">
         <header className="text-center">
           <h1
             className={`text-4xl font-extrabold mb-2 tracking-tight ${
@@ -37,28 +38,35 @@ export default function Home() {
           </h1>
           <p className={`text-sm ${isNight ? 'text-slate-300' : 'text-gray-600'}`}>
             放置风车和建筑，铺设电线，为你的浮岛带来光明！
+            <span className="ml-1.5 inline-flex items-center gap-1 text-indigo-500 font-semibold">
+              🔮 电力回声已启用
+            </span>
           </p>
         </header>
 
         <StatusBar />
 
         <div className="flex flex-col lg:flex-row gap-6 items-start justify-center">
-          <div className="order-2 lg:order-1 lg:w-56">
+          <div className="order-2 lg:order-1 lg:w-56 w-full flex flex-col gap-6">
             <Toolbar />
+            <div className="lg:hidden">
+              <EchoPanel />
+            </div>
           </div>
 
           <div className="order-1 lg:order-2 flex justify-center items-center py-8">
             <FloatingIsland />
           </div>
 
-          <div className="order-3 lg:w-56 hidden lg:block">
+          <div className="order-3 lg:w-64 hidden lg:flex flex-col gap-6">
+            <EchoPanel />
             <GameGuide isNight={isNight} />
           </div>
         </div>
 
         <footer className="text-center pb-4">
           <p className={`text-xs ${isNight ? 'text-slate-400' : 'text-gray-500'}`}>
-            用你的智慧构建一个完美的电力网络 ⚡
+            用你的智慧构建一个完美的电力网络 ⚡ · 🔮 电力回声见证你的电网演化
           </p>
         </footer>
       </div>
