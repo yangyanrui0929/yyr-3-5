@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { useGameStore } from '../store/useGameStore';
 import { GridCellComponent } from './GridCell';
+import { Building } from './Building';
 import { GRID_SIZE } from '../utils/constants';
 
 export const FloatingIsland: React.FC = () => {
@@ -52,12 +53,26 @@ export const FloatingIsland: React.FC = () => {
   }, [grid, rotateCell]);
 
   const isNight = dayTime >= 50;
+  const storedPower = useGameStore((s) => s.storedPower);
+  const satisfaction = useGameStore((s) => s.satisfaction);
+  const totalGeneration = useGameStore((s) => s.totalGeneration);
+  const totalConsumption = useGameStore((s) => s.totalConsumption);
 
-  const { diffMap, activeSnapshot } = useMemo(() => {
+  const { diffMap, activeSnapshot, snapshotPoweredSet } = useMemo(() => {
     const snapshot = snapshots.find((s) => s.id === activeSnapshotId) || null;
     const diff = computeDiff();
-    return { diffMap: diff, activeSnapshot: snapshot };
-  }, [activeSnapshotId, snapshots, computeDiff]);
+    const poweredSet = snapshot ? new Set(snapshot.poweredCells) : null;
+    return { diffMap: diff, activeSnapshot: snapshot, snapshotPoweredSet: poweredSet };
+  }, [
+    activeSnapshotId,
+    snapshots,
+    computeDiff,
+    grid,
+    storedPower,
+    satisfaction,
+    totalGeneration,
+    totalConsumption,
+  ]);
 
   return (
     <div className="relative">
@@ -96,45 +111,58 @@ export const FloatingIsland: React.FC = () => {
         />
 
         <div className="relative">
-          {activeSnapshot && (
+          {activeSnapshot && snapshotPoweredSet && (
             <div
               className="absolute inset-0 grid gap-0.5 p-2 rounded-2xl pointer-events-none z-0"
               style={{
                 gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
-                opacity: 0.35,
-                transform: 'translate(6px, 6px)',
-                filter: 'blur(0.5px)',
+                opacity: 0.55,
+                transform: 'translate(5px, 5px)',
               }}
             >
               {activeSnapshot.grid.map((row, y) =>
-                row.map((cell, x) => (
-                  <div
-                    key={`shadow-${x}-${y}`}
-                    className={`
-                      w-14 h-14 border rounded-[4px] transition-opacity
-                      ${
-                        cell.type !== 'empty'
-                          ? 'border-indigo-400/60 border-dashed bg-indigo-200/30'
-                          : 'border-transparent bg-transparent'
-                      }
-                    `}
-                    style={{
-                      borderRadius: '4px',
-                    }}
-                  >
-                    {cell.type !== 'empty' && (
-                      <div className="w-full h-full flex items-center justify-center opacity-70">
-                        <span className="text-2xl filter grayscale saturate-50">
-                          {cell.type === 'windmill' && '🌀'}
-                          {cell.type === 'house' && '🏠'}
-                          {cell.type === 'factory' && '🏭'}
-                          {cell.type === 'battery' && '🔋'}
-                          {cell.type === 'wire' && '⚡'}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                ))
+                row.map((cell, x) => {
+                  const key = `${x},${y}`;
+                  const wasPowered = snapshotPoweredSet.has(key);
+                  const shadowCell = {
+                    ...cell,
+                    powered: wasPowered,
+                    faulty: false,
+                  };
+                  return (
+                    <div
+                      key={`shadow-${x}-${y}`}
+                      className={`
+                        w-14 h-14 border rounded-[4px] transition-all relative overflow-hidden
+                        ${
+                          cell.type !== 'empty'
+                            ? wasPowered
+                              ? 'border-blue-400/70 border-dashed bg-blue-100/40'
+                              : 'border-indigo-400/50 border-dashed bg-indigo-200/20'
+                            : 'border-transparent bg-transparent'
+                        }
+                      `}
+                      style={{
+                        borderRadius: '4px',
+                      }}
+                    >
+                      {cell.type !== 'empty' && (
+                        <div className="absolute inset-0" style={{ filter: 'saturate(0.6)' }}>
+                          <Building cell={shadowCell} />
+                        </div>
+                      )}
+                      {wasPowered && cell.type !== 'empty' && (
+                        <div
+                          className="absolute inset-0 pointer-events-none"
+                          style={{
+                            boxShadow: 'inset 0 0 8px rgba(59, 130, 246, 0.35)',
+                            borderRadius: '4px',
+                          }}
+                        />
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           )}
@@ -153,7 +181,15 @@ export const FloatingIsland: React.FC = () => {
               row.map((cell, x) => {
                 const key = `${x},${y}`;
                 const diff = diffMap?.get(key) || null;
-                const snapshotCell = activeSnapshot ? activeSnapshot.grid[y][x] : null;
+                let snapshotCell = null;
+                if (activeSnapshot && snapshotPoweredSet) {
+                  const raw = activeSnapshot.grid[y][x];
+                  snapshotCell = {
+                    ...raw,
+                    powered: snapshotPoweredSet.has(key),
+                    faulty: false,
+                  };
+                }
                 return (
                   <div key={`${x}-${y}`} className="grid-cell" data-x={x} data-y={y}>
                     <GridCellComponent
